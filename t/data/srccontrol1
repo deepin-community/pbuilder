@@ -1,0 +1,58 @@
+# be evil with a leading comment and a blank line
+
+Source: pbuilder
+Section: devel
+Priority: optional
+Maintainer: The foo team <foo@ml.org>
+Uploaders:
+ Bar <bar@debian.org>,
+ Foo Bar <foo.bar@debian.org>,
+Build-Depends:
+ dblatex,
+ debconf | debconf-2.0,
+ debhelper (>= 10),
+ docbook-xsl,
+ ldp-docbook-xsl,
+ po-debconf,
+ po4a,
+ xsltproc,
+Standards-Version: 4.1.1
+Vcs-Git: https://anonscm.debian.org/git/pbuilder/pbuilder.git
+Vcs-Browser: https://anonscm.debian.org/git/pbuilder/pbuilder.git
+
+Package: pbuilder
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ debootstrap | cdebootstrap,
+ dpkg-dev (>= 1.17.0),
+ wget,
+ ${misc:Depends},
+Recommends:
+ devscripts,
+ eatmydata,
+ fakeroot,
+ net-tools | iproute2,
+ sudo,
+Suggests:
+ cowdancer,
+ gdebi-core,
+Homepage: http://pbuilder.alioth.debian.org
+Description: personal package builder for Debian packages
+ pbuilder constructs a chroot system, and builds a package inside the
+ chroot.
+ It is an ideal system to use to check
+ that a package has correct build-dependencies.
+ It uses apt extensively, and a local mirror, or a fast connection
+ to a Debian mirror is ideal, but not necessary.
+ .
+ "pbuilder create" uses debootstrap to create a chroot image.
+ .
+ "pbuilder update" updates the image to the current state of
+ testing/unstable/whatever
+ .
+ "pbuilder build" takes a *.dsc file and builds a binary in the chroot
+ image.
+ .
+ pdebuild is a wrapper for Debian Developers, to allow running
+ pbuilder just like "debuild", as a normal user.

@@ -1,0 +1,264 @@
+#!/bin/bash
+
+# testsuite to test pbuilder-satisfydepends-funcs.
+
+TD="$(dirname "$0")"
+. "$TD/testlib.sh"
+if [ -n "$PBUILDER_CHECKOUT" ]; then
+    . "$PBUILDER_CHECKOUT/pbuilder-satisfydepends-funcs"
+else
+    . "$PBUILDER_TEST_PKGLIBDIR/pbuilder-satisfydepends-funcs"
+fi
+
+DEBIAN_CONTROL=""
+
+cleanup() {
+    if [ -n "$DEBIAN_CONTROL" ]; then
+        rm -f "$DEBIAN_CONTROL"
+    fi
+}
+
+test_get_build_deps() {
+    local BINARY_ARCH
+
+    BINARY_ARCH="$1"
+
+    cat <<EOF >"$DEBIAN_CONTROL"
+Source: amule
+XXXX:
+Build-Depends:        
+ autotools-dev ( >= 1.2 ) ,
+	 debhelper 	,
+ quilt(<<12:0),
+##
+ libwxgtk2.8-dev
+Build-Depends-Indep: test [ amd64 i386 ], test1, 
+ test2[!i386 ! amd64], test3 | 
+ test4, test5
+Misc: test
+Build-Depends-Arch: foo1, foo2	,	foo3 (<< 12.23.34-5),
+	bar4 [!amd64] <notest>, foobar [i386], gnagna [ !s390x     ]
+
+Build-Depends: wrong build depends, line
+Description: test
+ other things
+ wow
+# EOL comment
+EOF
+    get_build_deps
+}
+
+test_get_build_deps_source_para_only() {
+    local BINARY_ARCH="$1"
+    cat <<EOF >"$DEBIAN_CONTROL"
+Source: foo
+Build-Depends: bar
+EOF
+    get_build_deps
+}
+
+test_get_build_deps_comment_between_lines() {
+    local BINARY_ARCH="$1"
+    cat <<EOF >"$DEBIAN_CONTROL"
+Source: foo
+# foo
+Build-Depends: bar
+EOF
+    get_build_deps
+}
+
+test_get_build_deps_one_line_preceding_comment() {
+    local BINARY_ARCH="all"
+    cat << EOF >"$DEBIAN_CONTROL"
+# Preceding comment
+Build-Depends: blabla
+EOF
+    get_build_deps
+}
+
+test_get_build_deps_one_line_trailing_comment() {
+    local BINARY_ARCH="all"
+    cat << EOF >"$DEBIAN_CONTROL"
+Build-Depends: blabla
+# EOL comment
+EOF
+    get_build_deps
+}
+
+test_get_build_deps_one_line_preceding_blank() {
+    local BINARY_ARCH="all"
+    cat << EOF >"$DEBIAN_CONTROL"
+
+Build-Depends: blabla
+EOF
+    get_build_deps
+}
+
+test_get_build_deps_dsc() {
+    cat <<EOF >"$DEBIAN_CONTROL"
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+Format: 1.0
+Source: hello-debhelper
+Build-Depends: debhelper (>= 7)
+Checksums-Sha1: 
+ fcbf0264928900adf03a7797474375e1a6fa3836 499638 hello-debhelper_2.4.orig.tar.gz
+ 0ea70eb46b4c90a8dbefbe60bebe4b9f9abb2733 5308 hello-debhelper_2.4-3.diff.gz
+
+
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.4.9 (GNU/Linux)
+
+iQEcBAEBCAAGBQJKml74AAoJEEHOfwufG4sysC4H/26EikyIgIqRuSXMiykc1hmd
+97id9nWl+QzgCpUEg/+uDqEW+Bl6291FstGvzTFCwmB5JjH9ErH1LsyG1OLXbFUb
+H89Em7qkl4o2ACTh255oM7FhVweof3UEaLCZMH+HZVVpHXNpEnhrfDvpTBbPGjUi
+-----END PGP SIGNATURE-----
+EOF
+    get_build_deps
+}
+
+test_get_parsed_build_deps_dsc() {
+    local ARCH="amd64"
+    local BINARY_ARCH="any"
+
+    cat "$TESTDATA_DIR/dsc1" > "$DEBIAN_CONTROL"
+    get_build_deps | filter_arch_deps "$ARCH" | filter_restriction_deps "$DEB_BUILD_PROFILES"
+}
+
+test_get_source_control_field_with_comments() {
+    cat <<EOF >"$DEBIAN_CONTROL"
+# This is a comment
+
+# So is this, but with a blank line above me
+Format: 1.0
+Source: something-funny
+Build-Depends: debhelper, something-else
+
+EOF
+    get_source_control_field "Source"
+}
+
+trap cleanup sigpipe sighup exit
+
+# TODO move to build dir
+DEBIAN_CONTROL="$(mktemp)"
+
+expect_output "autotools-dev (>= 1.2), debhelper, quilt (<< 12:0), libwxgtk2.8-dev, test [amd64 i386], test1, test2 [!i386 !amd64], test3 | test4, test5, foo1, foo2, foo3 (<< 12.23.34-5), bar4 [!amd64] <notest>, foobar [i386], gnagna [!s390x]" \
+    test_get_build_deps "any"
+expect_output "autotools-dev (>= 1.2), debhelper, quilt (<< 12:0), libwxgtk2.8-dev, foo1, foo2, foo3 (<< 12.23.34-5), bar4 [!amd64] <notest>, foobar [i386], gnagna [!s390x]" \
+    test_get_build_deps "binary"
+expect_output "autotools-dev (>= 1.2), debhelper, quilt (<< 12:0), libwxgtk2.8-dev, test [amd64 i386], test1, test2 [!i386 !amd64], test3 | test4, test5" \
+    test_get_build_deps "all"
+expect_output "bar" test_get_build_deps_source_para_only "any"
+expect_output "bar" test_get_build_deps_comment_between_lines "any"
+expect_output "blabla" test_get_build_deps_one_line_preceding_comment
+expect_output "blabla" test_get_build_deps_one_line_trailing_comment
+expect_output "blabla" test_get_build_deps_one_line_preceding_blank
+
+
+# return FALSE on INSTALL
+expect_fail checkbuilddep_archdeps "foo [amd64]" "amd64"
+expect_success checkbuilddep_archdeps "foo [i386]" "amd64"
+expect_fail checkbuilddep_archdeps "foo [i386 amd64]" "amd64"
+expect_success checkbuilddep_archdeps "foo [!amd64]" "amd64"
+expect_success checkbuilddep_archdeps "foo [!i386 !amd64]" "amd64"
+# the -classic satisfydep does odd bash-y things, and changes all spaces to /
+# so it can then more easily iterate over the ,
+expect_success checkbuilddep_archdeps "foo/[ia64/arm]" "armhf"
+expect_fail checkbuilddep_archdeps "foo/[!i386/!x32]" "amd64"
+
+test_filter_arch_deps() {
+    echo "$1" | filter_arch_deps "$2"
+}
+
+expect_output "foo" test_filter_arch_deps "foo" "amd64"
+expect_output "foo" test_filter_arch_deps "foo [amd64]" "amd64"
+expect_output "bar, foo" test_filter_arch_deps "bar, foo [amd64]" "amd64"
+expect_output "bar | foo" test_filter_arch_deps "bar | foo [amd64]" "amd64"
+expect_output "bar" test_filter_arch_deps "bar | foo [amd64]" "i386"
+
+expect_fail checkbuilddep_restrictiondeps "foo <!stage1>" ""
+expect_success checkbuilddep_restrictiondeps "foo <!stage1>" "stage1"
+expect_fail checkbuilddep_restrictiondeps "foo <!stage1>" "notest"
+expect_success checkbuilddep_restrictiondeps "foo <!stage1>" "stage1 notest"
+
+expect_success checkbuilddep_restrictiondeps "foo <stage1>" ""
+expect_fail checkbuilddep_restrictiondeps "foo <stage1>" "stage1"
+expect_success checkbuilddep_restrictiondeps "foo <stage1>" "notest"
+expect_fail checkbuilddep_restrictiondeps "foo <stage1>" "stage1 notest"
+
+expect_fail checkbuilddep_restrictiondeps "foo <!stage1 !notest>" ""
+expect_success checkbuilddep_restrictiondeps "foo <!stage1 !notest>" "stage1"
+expect_success checkbuilddep_restrictiondeps "foo <!stage1 !notest>" "notest"
+expect_success checkbuilddep_restrictiondeps "foo <!stage1 !notest>" "stage1 notest"
+
+expect_success checkbuilddep_restrictiondeps "foo <stage1 notest>" ""
+expect_success checkbuilddep_restrictiondeps "foo <stage1 notest>" "stage1"
+expect_success checkbuilddep_restrictiondeps "foo <stage1 notest>" "notest"
+expect_fail checkbuilddep_restrictiondeps "foo <stage1 notest>" "stage1 notest"
+
+expect_success checkbuilddep_restrictiondeps "foo <!stage1 notest>" ""
+expect_success checkbuilddep_restrictiondeps "foo <!stage1 notest>" "stage1"
+expect_fail checkbuilddep_restrictiondeps "foo <!stage1 notest>" "notest"
+expect_success checkbuilddep_restrictiondeps "foo <!stage1 notest>" "stage1 notest"
+# the -classic satisfydep does odd bash-y things, and changes all spaces to /
+# so it can then more easily iterate over the ,
+expect_success checkbuilddep_restrictiondeps "foo/<!stage1/notest>" ""
+expect_success checkbuilddep_restrictiondeps "foo/<!stage1/notest>" "stage1"
+expect_fail checkbuilddep_restrictiondeps "foo/<!stage1/notest>" "notest"
+expect_success checkbuilddep_restrictiondeps "foo/<!stage1/notest>" "stage1 notest"
+
+expect_success checkbuilddep_restrictiondeps "foo <stage1 !notest>" ""
+expect_fail checkbuilddep_restrictiondeps "foo <stage1 !notest>" "stage1"
+expect_success checkbuilddep_restrictiondeps "foo <stage1 !notest>" "notest"
+expect_success checkbuilddep_restrictiondeps "foo <stage1 !notest>" "stage1 notest"
+
+test_filter_restriction_deps() {
+    echo "$1" | filter_restriction_deps "$2"
+}
+
+expect_output "foo" test_filter_restriction_deps "foo <!stage1>" ""
+expect_output "" test_filter_restriction_deps "foo <!stage1>" "stage1"
+expect_output "foo" test_filter_restriction_deps "foo <stage1>" "stage1"
+expect_output "bar, foo" test_filter_restriction_deps "bar, foo <stage1>" "stage1"
+expect_output "bar | foo" test_filter_restriction_deps "bar | foo <stage1>" "stage1"
+expect_output "bar" test_filter_restriction_deps "bar | foo <!stage1>" "stage1"
+expect_output "foo" test_filter_restriction_deps "foo <a> <b>" "a"
+expect_output "foo" test_filter_restriction_deps "foo <a> <b>" "b"
+expect_output "foo" test_filter_restriction_deps "foo <!a> <!b>" "a"
+expect_output "foo" test_filter_restriction_deps "foo <!a> <!b>" "b"
+expect_output "" test_filter_restriction_deps "foo <a b>" "a"
+expect_output "" test_filter_restriction_deps "foo <a b>" "b"
+expect_output "" test_filter_restriction_deps "foo <!a !b>" "a"
+expect_output "" test_filter_restriction_deps "foo <!a !b>" "b"
+expect_output "" test_filter_restriction_deps "foo <!a !b>" "a b"
+expect_output "foo" test_filter_restriction_deps "foo <a b>" "a b"
+expect_output "foo" test_filter_restriction_deps "foo <a b>" "b a"
+
+test_filter_arch_restriction_deps() {
+    echo "$1" | filter_arch_deps "$2" | filter_restriction_deps "$3"
+}
+
+expect_output "foo" test_filter_arch_restriction_deps "foo [amd64] <!stage1>" "amd64" ""
+expect_output "" test_filter_arch_restriction_deps "foo [amd64] <stage1>" "amd64" ""
+expect_output "foo" test_filter_arch_restriction_deps "foo [amd64] <!stage1>" "amd64" ""
+expect_output "" test_filter_arch_restriction_deps "foo [i386] <stage1>" "amd64" "stage1"
+
+test_filter_version_restriction_deps() {
+    echo "$1" | filter_restriction_deps "$2"
+}
+
+# just to make sure the build profile parser doesn't trip over <<
+expect_output "foo (<< 2:8)" test_filter_version_restriction_deps "foo (<< 2:8)" "whatever"
+expect_output "foo (<< 2:8)" test_filter_version_restriction_deps "foo (<< 2:8) <!a> <!b>" ""
+expect_output "" test_filter_version_restriction_deps "foo (<< 2:8) <!a !b>" "b"
+expect_output "foo (<< 2:8)" test_filter_version_restriction_deps "foo (<< 2:8) <!a> <!b>" "b"
+expect_output "" test_filter_version_restriction_deps "foo (<< 2:8) <!a> <!b>" "a b"
+
+expect_output "debhelper (>= 7)" test_get_build_deps_dsc
+expect_output "debhelper (>= 9), haskell-devscripts (>= 0.8.15), cdbs, ghc, ghc-prof, libghc-hashable-dev (<< 1.3), libghc-hashable-prof (<< 1.3), ghc-doc, libghc-hashable-doc (<< 1.3)" test_get_parsed_build_deps_dsc
+
+expect_output "something-funny" test_get_source_control_field_with_comments
+
+testlib_summary

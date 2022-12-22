@@ -1,0 +1,113 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#               2015      Mattia Rizzolo <mattia@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+set -e
+
+. "${BASH_SOURCE%/*}/pbuilder-checkparams"
+
+if [ -n "$DISTRIBUTION" ] && [ "$OVERRIDE_APTLINES" = "yes" ]; then
+    log.i "Upgrading for distribution $DISTRIBUTION" 
+fi
+if [ "${PBUILDER_DEBUGMODE}" = "yes" ]; then
+    TRAP="echo ignoring trap "
+else
+    TRAP=trap
+fi
+
+# show the current time before doing anything.
+echobacktime
+
+extractbuildplace
+$TRAP umountproc_cleanbuildplace_trap exit sighup
+
+log.i "Refreshing the base.tgz "
+log.i "upgrading packages"
+$CHROOTEXEC apt-get -q "${APTGETOPT[@]}" update
+
+
+install_packages_for_optional_features
+
+if [ -n "$REMOVEPACKAGES" ]; then remove_packages $REMOVEPACKAGES ; fi
+
+recover_aptcache
+
+$TRAP saveaptcache_umountproc_cleanbuildplace_trap exit sighup
+if [ "$DEBDELTA" = "yes" ]; then
+    if $CHROOTEXEC which debdelta-upgrade > /dev/null 2>&1 ; then
+        log.i "Using debdelta-upgrade for available deltas"
+        if $CHROOTEXEC debdelta-upgrade ; then
+            :
+        else
+            log.w "debdelta failed, continue and use plain apt to update the system"
+        fi
+    else
+        log.w "debdelta is enabled but not (yet) installed, not using it"
+    fi
+fi
+
+$CHROOTEXEC apt-get -q -y "${APTGETOPT[@]}" "${FORCE_CONFNEW[@]}" dist-upgrade
+# autoremove: Ignore error in case of etch because apt in etch doesn't
+# support autoremove. TODO: Do not ignore error when etch is no longer
+# supported.
+$CHROOTEXEC apt-get -q -y "${APTGETOPT[@]}" autoremove || true
+$CHROOTEXEC apt-get -q -y "${APTGETOPT[@]}" install \
+    build-essential \
+    dpkg-dev \
+    $EXTRAPACKAGES
+# debdelta dependencies are broken (#545831)
+if [ "$DEBDELTA" = "yes" ]; then
+    $CHROOTEXEC apt-mark auto python-apt xdelta3
+fi
+
+save_aptcache
+add_additional_aptkeyrings
+
+# optionally auto-clean apt-cache
+if [ "${AUTOCLEANAPTCACHE}" = "yes" -a -n "$APTCACHE" ]; then
+    log.i "Cleaning the cached apt archive"
+    $CHROOTEXEC apt-get autoclean || true
+    find "$APTCACHE/" -maxdepth 1 -name \*.deb | \
+	while read A; do
+	    if [ ! -f "$BUILDPLACE/var/cache/apt/archives/$(basename "$A")" -a \
+		-f "$A" ]; then
+		log.i "obsolete cache content "$(basename "$A")" removed"
+		rm -f "$A" || true
+	    fi
+    done
+fi
+
+$TRAP umountproc_cleanbuildplace_trap exit sighup
+executehooks "E"
+
+umountproc
+$CHROOTEXEC apt-get clean || true
+
+$TRAP cleanbuildplace_trap exit sighup
+if [ ! "${INTERNAL_BUILD_UML}" = "yes" ]; then
+    create_basetgz
+fi
+if [ "${PRESERVE_BUILDPLACE}" = "yes" ]; then
+    :
+else
+    :
+    cleanbuildplace
+fi
+trap - exit sighup
+exit 0

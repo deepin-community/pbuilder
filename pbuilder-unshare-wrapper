@@ -1,0 +1,24 @@
+#!/bin/sh
+
+die() {
+	echo >&2 E: "$2" returned error code "$1"
+	echo >&2 N: Could not set up the loopback interface.
+	exit 1
+}
+
+if test -x /sbin/ifconfig; then
+	/sbin/ifconfig lo up || die $? ifconfig
+elif test -x /sbin/ip; then
+	/sbin/ip link set lo up || die $? ip
+elif test -x /bin/ip; then
+	/bin/ip link set lo up || die $? ip
+else
+	echo >&2 E: Neither ifconfig nor ip found.
+	echo >&2 N: Could not set up the loopback interface.
+	exit 1
+fi
+
+# having this variable set could cause programs looking for unreachable machines
+unset http_proxy
+
+exec "$@"

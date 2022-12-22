@@ -1,0 +1,159 @@
+#!/bin/bash
+#
+# This file is part of  pbuilder -- personal Debian package builder
+#
+# Copyright © 2015 Mattia Rizzolo <mattia@mapreri.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, see <http://www.gnu.org/licenses/>.
+#   On Debian systems, the full text of the GNU General Public
+#   License version 2 can be found in the file
+#   `/usr/share/common-licenses/GPL-2'.
+
+
+# testsuite to test pbuilder-satisfydepends-funcs.
+
+TD="$(dirname "$0")"
+. "$TD/testlib.sh"
+if [ -n "$PBUILDER_CHECKOUT" ]; then
+    . "$PBUILDER_CHECKOUT/pbuilder-buildpackage-funcs"
+else
+    . "$PBUILDER_TEST_PKGLIBDIR/pbuilder-buildpackage-funcs"
+fi
+
+DEBIAN_CONTROL=""
+
+cleanup() {
+    if [ -n "${TEMP_DIR:-}" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+}
+
+test_getdscfilesNormal () {
+    cat "$TESTDATA_DIR/dsc1" > "$DEBIAN_CONTROL"
+    get822files dsc "$DEBIAN_CONTROL"
+}
+
+test_getdscfilesWithoutNL () {
+    cat "$TESTDATA_DIR/dsc2_withoutNL" > "$DEBIAN_CONTROL"
+    get822files dsc "$DEBIAN_CONTROL"
+}
+
+test_getchangesfilesNormal () {
+    cat "$TESTDATA_DIR/changes1" > "$DEBIAN_CONTROL"
+    get822files changes "$DEBIAN_CONTROL"
+}
+
+test_getdscfilesWithInsaneParentDir () {
+    get822files dsc "$TESTDATA_DIR/fool's \"data /dsc"
+}
+
+test_dsc_get_basename_normal_with_revision() {
+    dsc_get_basename "$TESTDATA_DIR/dsc1" yes
+}
+
+test_dsc_get_basename_normal_without_revision() {
+    dsc_get_basename "$TESTDATA_DIR/dsc1" no
+}
+
+test_dsc_get_basename_epoch_with_revision() {
+    dsc_get_basename "$TESTDATA_DIR/dsc3_epoch" yes
+}
+
+test_dsc_get_basename_epoch_without_revision() {
+    dsc_get_basename "$TESTDATA_DIR/dsc3_epoch" no
+}
+
+test_dsc_get_basename_native_with_revision() {
+    dsc_get_basename "$TESTDATA_DIR/dsc4_native" yes
+}
+
+test_dsc_get_basename_native_without_revision() {
+    dsc_get_basename "$TESTDATA_DIR/dsc4_native" no
+}
+
+setup_extraresults () {
+    mkdir -p "$TEMP_DIR/$BUILDSUBDIR/debian"
+    mkdir -p "$TEMP_DIR/should-ignore"
+    touch "$TEMP_DIR/file_with_*_asterisk"
+    touch "$TEMP_DIR/file with spaces.changes"
+    #touch "$TEMP_DIR/file with * asterisk and spaces"
+    touch "$TEMP_DIR/file_with_a_normal_name.changes"
+    touch "$TEMP_DIR/$BUILDSUBDIR/foo.txt"
+    touch "$TEMP_DIR/should-ignore/foo.txt"
+}
+
+test_extraresults1 () {
+    ADDITIONAL_BUILDRESULTS=('../*.changes')
+    _find_additional_buildresults
+}
+
+test_extraresults2 () {
+    ADDITIONAL_BUILDRESULTS=(
+        "../file*with*spaces*"
+        "../file\ with\ spaces.changes"
+        "../file_with_\*_asterisk"
+    )
+    _find_additional_buildresults
+}
+
+test_extraresults3() {
+    ADDITIONAL_BUILDRESULTS=(
+        "foo.txt"
+    )
+    _find_additional_buildresults
+}
+
+
+trap cleanup sigpipe sighup exit
+
+# FIXME move to build dir also because we have to hardoce $TEMP_DIR/ on the result below
+TEMP_DIR="$(mktemp -d)"
+DEBIAN_CONTROL="$(mktemp -p "$TEMP_DIR")"
+BUILDPLACE="$TEMP_DIR"
+BUILDDIR=''
+BUILDSUBDIR=fake-pkg
+
+expect_output "$DEBIAN_CONTROL
+$TEMP_DIR/haskell-concrete-typerep_0.1.0.2.orig.tar.gz
+$TEMP_DIR/haskell-concrete-typerep_0.1.0.2-2.debian.tar.gz" test_getdscfilesNormal
+
+expect_output "$DEBIAN_CONTROL
+$TEMP_DIR/golang-xmpp-dev_0.0~git20140304.orig.tar.gz
+$TEMP_DIR/golang-xmpp-dev_0.0~git20140304-1.debian.tar.xz" test_getdscfilesWithoutNL
+
+expect_output "$DEBIAN_CONTROL
+$TEMP_DIR/pbuilder_0.225.2~bpo8+1.dsc
+$TEMP_DIR/pbuilder_0.225.2~bpo8+1.tar.xz
+$TEMP_DIR/pbuilder_0.225.2~bpo8+1_all.deb" test_getchangesfilesNormal
+
+expect_output "$TESTDATA_DIR/fool's \"data /dsc
+$TESTDATA_DIR/fool's \"data /haskell-concrete-typerep_0.1.0.2.orig.tar.gz
+$TESTDATA_DIR/fool's \"data /haskell-concrete-typerep_0.1.0.2-2.debian.tar.gz" test_getdscfilesWithInsaneParentDir
+
+expect_output "haskell-concrete-typerep_0.1.0.2-2" test_dsc_get_basename_normal_with_revision
+expect_output "haskell-concrete-typerep_0.1.0.2" test_dsc_get_basename_normal_without_revision
+expect_output "openssh_7.4p1-5" test_dsc_get_basename_epoch_with_revision
+expect_output "openssh_7.4p1" test_dsc_get_basename_epoch_without_revision
+expect_output "cowdancer_0.82" test_dsc_get_basename_native_with_revision
+expect_output "cowdancer_0.82" test_dsc_get_basename_native_without_revision
+
+setup_extraresults
+expect_output "$TEMP_DIR/$BUILDSUBDIR/../file with spaces.changes
+$TEMP_DIR/$BUILDSUBDIR/../file_with_a_normal_name.changes" test_extraresults1
+expect_output "$TEMP_DIR/$BUILDSUBDIR/../file with spaces.changes
+$TEMP_DIR/$BUILDSUBDIR/../file with spaces.changes
+$TEMP_DIR/$BUILDSUBDIR/../file_with_*_asterisk" test_extraresults2
+expect_output "$TEMP_DIR/$BUILDSUBDIR/foo.txt" test_extraresults3
+
+testlib_summary

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -eu
+
+if [ -z "${TMPDIR:-}" ]; then
+    if [ -n "${AUTOPKGTEST_TMP:-}" ]; then
+        TMPDIR="$AUTOPKGTEST_TMP"
+    else
+        TMPDIR="$(mktemp -d --tmpdir=/tmp pbuilder-unit-tests-XXXXXXXXXX)"
+        trap 'rm -r "$TMPDIR"' EXIT
+    fi
+fi
+
+echo "Copying tests files..."
+cp -r t/* "$TMPDIR"
+export PBUILDER_TEST_VERBOSE="yes"
+"$TMPDIR"/runtests.sh

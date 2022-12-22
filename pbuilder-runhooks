@@ -1,0 +1,9 @@
+#! /bin/bash
+
+# This file was merged with pbuilder-modules.
+# We can't delete it since it's referenced in pdebuild-internal, and since we
+# can't assure the same pbuilder version outside and inside the chroot we have
+# to be backward-compatible.
+# Otherwise running an old pbuilder with a newer chroot would break badly.
+
+. "${BASH_SOURCE%/*}/pbuilder-modules"

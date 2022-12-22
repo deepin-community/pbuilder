@@ -1,0 +1,4 @@
+debuild-pbuilder.1
+pbuilder.8
+pbuilderrc.5
+pdebuild.1

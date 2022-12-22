@@ -1,0 +1,315 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#               2015-2016 Mattia Rizzolo <mattia@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+# functions local to pbuilder-buildpackage
+
+. "${BASH_SOURCE%/*}/pbuilder-modules"
+
+get822files () {
+    # get list of files listed in the Files field of a .changes or .dsc (to
+    # be specified in the first parameter) and output them one file per line
+    local type="$1"
+    local input="$2"
+    case $type in
+        changes) local field=5 ;;
+        dsc) local field=3 ;;
+        *) log.error "unexpected error in get822files()" ; exit 1 ;;
+    esac
+    echo "$input"
+    cat "$input" | awk -v dir="$(dirname "$input")" '
+        BEGIN {p=0}
+        ! /^[ \t]/ {p=0}
+        /^[ \t]*$/ {p=0}
+        /^Files:/ {p=1}
+        /^ / && p {print dir "/" $'${field}'}
+    '
+}
+
+function copydsc () {
+    local DSCFILE=$(get822files "dsc" "$1")
+    local TARGET="$2"
+    local FILE
+    while read -r FILE ; do
+        log.i "copying [$FILE]"
+        cp -p "$FILE" "$TARGET"
+        chmod u+rw "$TARGET/$(basename "$FILE")"
+    done <<< "$DSCFILE"
+}
+
+function dsc_get_basename() {
+    local dscfile="$1"
+    local with_revision="$2"
+
+    local src=$(get822field "Source" "$dscfile")
+    local source_version=$(get822field "Version" "$dscfile")
+
+    # Parse version string
+    local epoch
+    local version
+    local revision
+    case "$source_version" in
+        *:*)
+            epoch=${source_version%%:*}
+            source_version=${source_version#*:}
+            ;;
+        *)
+            ;;
+    esac
+    case "$source_version" in
+        *-*)
+            version=${source_version%-*}
+            revision=${source_version##*-}
+            ;;
+        *)
+            version=$source_version
+            ;;
+    esac
+
+    local vs
+    if [ "$with_revision" = "yes" -a -z "${revision:-}" ]; then
+        with_revision=no
+    fi
+    # Epoch always omitted
+    case "$with_revision" in
+        yes) vs="${version}-${revision}" ;;
+        no)  vs="${version}" ;;
+        *)   log.error "unexpected with_revision: $with_revision" ; exit 1 ;;
+    esac
+
+    echo "${src}_${vs}"
+}
+
+function checkbuilddep () {
+    # call satisfydepends
+    local BUILDOPT="--binary-all"
+    case "${BINARY_ARCH}" in
+        binary) BUILDOPT="--binary-arch";;
+        all) BUILDOPT="--binary-indep";;
+        *) ;;
+    esac
+    case "$(readlink -e "$PBUILDERSATISFYDEPENDSCMD")" in
+        *-apt) local control="$BUILDDIR/$(basename "$1")" ;;
+        *) local control="$1" ;;
+    esac
+    if \
+        ("$PBUILDERSATISFYDEPENDSCMD" \
+            --build-arch "$ARCHITECTURE" \
+            --host-arch "$HOST_ARCH" \
+            --control "$control" \
+            --chroot "${BUILDPLACE}" \
+            --internal-chrootexec "${CHROOTEXEC}" \
+            "${BUILDOPT}" \
+            "${PBUILDERSATISFYDEPENDSOPT[@]}"); \
+    then
+        :
+    else
+        # If asked to preserve the build place, and pbuilder-satisfydepends
+        # didn't taint it, then don't clean it when exiting.
+        if [ $? -eq 2 -a "${PRESERVE_BUILDPLACE}" = "yes" ]; then
+            trap umountproc_trap exit sighup
+        fi
+        log.e "pbuilder-satisfydepends failed."
+        exit 2
+    fi
+    # install extra packages to the chroot
+    if [ -n "$EXTRAPACKAGES" ]; then 
+        $CHROOTEXEC apt-get -q -y "${APTGETOPT[@]}" install ${EXTRAPACKAGES}
+    fi
+}
+
+function showbuildbanner () {
+    # show some banners for building
+    log.i "pbuilder-buildpackage/"$(dpkg --print-architecture) 
+    log.i "$1"
+}
+
+function cowprotect () {
+    # a hack for cowdancer, used when a file is edited in-place;
+    # Copy the file to create a new i-node so that hardlinked original is intact
+    for A in "$@"; do
+        if readlink -f "$A" > /dev/null; then
+            A=$(readlink -f "$A")
+            mv "$A" "$A"~
+            cp -a "$A"~ "$A"
+            rm -f "$A"~
+        fi
+    done
+}
+
+function addgrsecgroup () {
+    # if grsecurity with TPE (Trusted Path Execution) is active, add user to allowed group
+    [ "$(sysctl -ne kernel.grsecurity.tpe)" = "1" ] || return 0
+    [ "$(sysctl -ne kernel.grsecurity.tpe_invert)" = "1" ] || return 0
+
+    local TPEGID=$(sysctl -n kernel.grsecurity.tpe_gid)
+    log.i "Adding build user to grsec-tpe group"
+    sed -i "/\(^grsec-tpe:\|:$TPEGID:\)/d" "$BUILDPLACE/etc/group"
+    echo "grsec-tpe:x:$TPEGID:$BUILDUSERNAME" >> "$BUILDPLACE/etc/group"
+}
+
+function createbuilduser () {
+    # create the build user, if it is necessary and specified.
+    if [ -n "$BUILDUSERNAME" -a -n "$BUILDUSERID" ]; then
+        if [ -e $BUILDPLACE/etc/shadow ]; then p='x'; else p='*'; fi
+        if [ -e $BUILDPLACE/etc/gshadow ]; then g='x'; else g='*'; fi
+        if ! grep -q ^$BUILDUSERNAME: $BUILDPLACE/etc/passwd; then
+            cowprotect $BUILDPLACE/etc/passwd
+            echo "$BUILDUSERNAME:$p:$BUILDUSERID:$BUILDUSERID:,,,:$BUILD_HOME:/bin/sh" >> $BUILDPLACE/etc/passwd
+        fi
+        if ! grep -q ^$BUILDUSERNAME: $BUILDPLACE/etc/group; then
+            cowprotect $BUILDPLACE/etc/group
+            echo "$BUILDUSERNAME:$g:$BUILDUSERID:" >> $BUILDPLACE/etc/group
+            addgrsecgroup
+        fi
+        if [ -e $BUILDPLACE/etc/shadow ] && ! grep -q ^$BUILDUSERNAME: $BUILDPLACE/etc/shadow; then
+            cowprotect $BUILDPLACE/etc/shadow
+            echo "$BUILDUSERNAME:!:::::::" >> $BUILDPLACE/etc/shadow
+        fi
+        if [ -e $BUILDPLACE/etc/gshadow ] && ! grep -q ^$BUILDUSERNAME: $BUILDPLACE/etc/gshadow; then
+            cowprotect $BUILDPLACE/etc/gshadow
+            echo "$BUILDUSERNAME:!::" >> $BUILDPLACE/etc/gshadow
+        fi
+        unset LOGNAME || true
+    else
+        unset LOGNAME || true
+    fi
+}
+
+function setup_ccache() {
+    if [ -n "$CCACHEDIR" ]; then
+        log.i "Setting up ccache"
+        if ! [ -d "$BUILDPLACE/$CCACHEDIR" ]; then
+            mkdir -p "$BUILDPLACE/$CCACHEDIR"
+        fi
+        chown -R $BUILDUSERID:$BUILDUSERID "$BUILDPLACE/$CCACHEDIR"
+        CCACHE_ENV="CCACHE_DIR=$CCACHEDIR"
+        unset CCACHE_DIR
+    fi
+}
+
+function binNMU() {
+    if [ "$BIN_NMU" == "no" ]; then
+        return
+    fi
+    if [ -z "$BINNMU_MESSAGE" ]; then
+        log.e "No changelog message provided for binNMU entry."
+        exit 1
+    fi
+    if [ -z "$BINNMU_VERSION" ]; then
+        log.w "No version provided for binNMU entry, fall back to 1."
+        BINNMU_VERSION=1
+    fi
+    local arch=$($CHROOTEXEC dpkg-architecture -qDEB_HOST_ARCH)
+    local date=$(date -R ${BINNMU_TIMESTAMP:+-d "${BINNMU_TIMESTAMP}"})
+    log.i "Doing a binNMU, version $BINNMU_VERSION for $DISTRIBUTION/$arch to '$BINNMU_MESSAGE'"
+    local cl=$(ls "$BUILDPLACE/$BUILDDIR/$BUILDSUBDIR"/debian/changelog)
+    local tmpcl=$(mktemp pbuilder.tmpchangelog.XXXXXXXXXXX)
+    if [ ! -f "$cl" ]; then
+        log.e "Cannot open debian/changelog for binNMU version handling."
+        exit 1
+    fi
+    mv "$cl" "$tmpcl"
+    local package=$(dpkg-parsechangelog -l "$tmpcl" -c 1 --show-field Source)
+    local version=$(dpkg-parsechangelog -l "$tmpcl" -c 1 --show-field Version)
+    if [ -z "$BINNMU_MAINTAINER" ]; then
+        log.w "No maintainer provided for binNMU entry, fall back to last uploader."
+        BINNMU_MAINTAINER=$(dpkg-parsechangelog -l $tmpcl -c 1 --show-field Maintainer)
+    fi
+    if [ -z "$DISTRIBUTION" ]; then
+        log.w "No distribution provided, using the field from the last upload"
+        DISTRIBUTION=$(dpkg-parsechangelog -l "$tmpcl" -c 1 --show-field Distribution)
+    fi
+    CHANGES_BASENAME="$CHANGES_BASENAME+b$BINNMU_VERSION"
+    DEBBUILDOPTS="${DEBBUILDOPTS} -e\"$BINNMU_MAINTAINER\" -m\"$BINNMU_MAINTAINER\""
+    cat > "$cl" << EOF
+$package ($version+b$BINNMU_VERSION) $DISTRIBUTION; urgency=low, binary-only=yes
+
+  * Binary-only non-maintainer upload for $arch; no source changes.
+  * $BINNMU_MESSAGE
+
+ -- $BINNMU_MAINTAINER  $date
+
+EOF
+    cat "$tmpcl" >> "$cl"
+    rm "$tmpcl"
+}
+
+cross_build_setup () {
+    if [[ "$ARCHITECTURE" = "$HOST_ARCH" ]]; then
+        # native build, nothing interesting to do here
+        return
+    fi
+    log.i "Doing a cross-architecture build"
+    log.i "Build architecture: $ARCHITECTURE"
+    log.i "Host architecture: $HOST_ARCH"
+
+    if [ "${NO_AUTO_CROSS:-}" != "really-dont-mess-with-me" ]; then
+        log.i "Setting up the environment for a cross build..."
+        if [[ "$(readlink -e "$PBUILDERSATISFYDEPENDSCMD")" != *-apt ]]; then
+            log.e "Cross building is possible only with the APT dependency resolver"
+            exit 1
+        fi
+        $CHROOTEXEC dpkg --add-architecture "$HOST_ARCH"
+        $CHROOTEXEC apt-get -q "${APTGETOPT[@]}" update
+        # preinstall libc-dev and libstdc++-dev 'cause https://bugs.debian.org/815172
+        # also, we end need to figure a versioned libstdc++-dev because the unversioned
+        # variant is a virtual package, and often there are more than one, and apt can't
+        # pick one for us
+        local gcc_ver
+        gcc_ver="$($CHROOTEXEC dpkg-query -W --showformat='${Depends}\n' gcc | sed -n 's/^.*gcc-\([0-9.]\+\)\([ ,].*\|$\)/\1/p')"
+        if [ -z "$gcc_ver" ]; then
+            log.e "Failed to determine default GCC version for installing cross build dependencies"
+            exit 1
+        fi
+        EXTRAPACKAGES="${EXTRAPACKAGES:+"$EXTRAPACKAGES" }crossbuild-essential-$HOST_ARCH libc-dev:$HOST_ARCH libstdc++${gcc_ver:+-"$gcc_ver"}-dev:$HOST_ARCH"
+        DEBBUILDOPTS="${DEBBUILDOPTS:+"$DEBBUILDOPTS" }--host-arch $HOST_ARCH"
+        if [ "${NO_AUTO_CROSS:-}" != "yes" ]; then
+            export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:+"$DEB_BUILD_OPTIONS" }nocheck"
+            export DEB_BUILD_PROFILES="${DEB_BUILD_PROFILES:+"$DEB_BUILD_PROFILES" }nocheck cross"
+        fi
+    else
+        log.w "Doing a cross build, but not setting up the environment as instructed"
+        return
+    fi
+}
+
+function _find_additional_buildresults() {
+    local file f
+    local root="${BUILDPLACE}${BUILDDIR}/${BUILDSUBDIR}"
+    for file in "${ADDITIONAL_BUILDRESULTS[@]}"; do
+        log.d "checking [$file]..."
+        echo "$root/$file" | perl -ne 'print "$_\n" foreach glob($_)' | \
+        while read f ; do
+            if [ -e "$f" ]; then
+                echo "$f"
+            else
+                log.w "file [$file] not found"
+            fi
+        done
+    done
+}
+
+function export_additional_buildresults() {
+    local file
+    for file in $(_find_additional_buildresults); do
+        log.i "Trying to save additional result '${file}'"
+        cp -a "${file}" "${BUILDRESULT}" || true
+    done
+}

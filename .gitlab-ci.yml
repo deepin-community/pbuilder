@@ -1,0 +1,22 @@
+before_script:
+    - apt-get -q update
+
+test:
+  image: debian:unstable
+  script:
+    - env DEBIAN_FRONTEND=noninteractive apt-get -q -y --no-install-recommends install dpkg-dev man-db
+    - make check
+
+pages:
+  image: debian:unstable-slim
+  script:
+    - env DEBIAN_FRONTEND=noninteractive apt-get -q -y --no-install-recommends install make docbook-xsl ldp-docbook-xsl xsltproc po4a dblatex
+    - make -C Documentation
+    - mkdir -v public
+    - mv -v Documentation/*.html Documentation/*.css Documentation/*pdf public/
+    - ln -s -v pbuilder-doc.html public/index.html
+  artifacts:
+    paths:
+      - public
+  only:
+    - master

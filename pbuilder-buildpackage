@@ -1,0 +1,314 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#               2015      Mattia Rizzolo <mattia@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+
+export LANG=C
+export LC_ALL=C
+set -e
+
+. "${BASH_SOURCE%/*}/pbuilder-checkparams"
+. "${BASH_SOURCE%/*}/pbuilder-buildpackage-funcs"
+
+PACKAGENAME="$1"
+if [ ! -f "$PACKAGENAME" ]; then
+    log.e "Source package [$PACKAGENAME] does not exist"
+    exit 1;
+fi;
+if [ "${PACKAGENAME:(-4)}" != ".dsc" ]; then
+    log.e "The given filename does not seems to be the name of a Debian source package."
+    log.e "You need to pass a file ending with .dsc (given '$PACKAGENAME')."
+    exit 1
+fi
+shift
+if [ -n "$*" ]; then
+    log.w "The following options specified after the .dsc will be ignored: [$@]"
+fi
+
+if [ -n "$BUILDUSERNAME" -a -n "$BUILDUSERID" ]; then
+    # Command to SU to user.
+    # LD_PRELOAD: Normal users don't have write access to build
+    # environment, so cowdancer shouldn't have to run, and fakeroot
+    # should be running later, so it shouldn't matter.
+    # LOGNAME and USER: set this to shut up some tools.
+    SUTOUSER="LD_PRELOAD= LOGNAME=$BUILDUSERNAME USER=$BUILDUSERNAME /sbin/start-stop-daemon --start --pidfile /dev/null --chuid $BUILDUSERNAME --startas /bin/sh"
+else
+    # run the build in root
+    BUILDUSERID=0
+    BUILDUSERNAME=root
+    SUTOUSER="LOGNAME=$BUILDUSERNAME /bin/sh"
+fi
+
+UNSHARE=
+case $USENETWORK in
+    yes)
+        if [ "$DEB_BUILD_ARCH_OS" = "linux" ]; then
+            # omit the warning when running on kFreeBSD or Hurd
+            log.w "pbuilder: network will not be disabled during build!"
+        fi
+        ;;
+    *)
+        if unshare -n -- /usr/lib/pbuilder/pbuilder-unshare-wrapper true; then
+            USENETWORK=no
+            UNSHARE="unshare -n -- /usr/lib/pbuilder/pbuilder-unshare-wrapper"
+            log.i "pbuilder: network access will be disabled during build"
+        else
+            USENETWORK=yes
+            if [ "$DEB_BUILD_ARCH_OS" = "linux" ]; then
+                log.w "pbuilder: unshare CLONE_NEWNET not available"
+            fi
+            log.i "pbuilder: network access is available during build!"
+        fi
+        ;;
+esac
+
+
+# created files should have these UID/GIDs outside of chroot.
+BUILDRESULTUID="${BUILDRESULTUID:-${SUDO_UID:-0}}"
+BUILDRESULTGID="${BUILDRESULTGID:-${SUDO_GID:-0}}"
+
+echobacktime
+extractbuildplace 
+trap umountproc_cleanbuildplace_trap exit sighup sigpipe
+
+if [ ! -d "${BUILDRESULT}" ]; then
+    if [ -n "${BUILDRESULT}" ] ; then
+        mkdir -p "${BUILDRESULT}"
+    fi
+    if [ -d "${BUILDRESULT}" ]; then
+        log.i "created buildresult dir: ${BUILDRESULT}"
+    else
+        log.e "failed creating buildresult dir: ${BUILDRESULT}"
+        exit 1
+    fi
+fi
+
+if [ -z "${PBUILDER_BUILD_LOGFILE}" ]; then
+    if [ "${PKGNAME_LOGFILE}" = "yes" ]; then
+        PBUILDER_BUILD_LOGFILE="${BUILDRESULT}/$(basename "${PACKAGENAME}" .dsc)${PKGNAME_LOGFILE_EXTENSION}"
+        exec > >(tee "${PBUILDER_BUILD_LOGFILE}") 2>&1
+        PBUILDER_BUILD_LOGFILE=$(readlink -f "${PBUILDER_BUILD_LOGFILE}")
+        log.i "Using pkgname logfile"
+        echobacktime
+    fi
+fi
+
+# make logfile have the permissions, logfiles should already be created in all cases
+if [ -f "${PBUILDER_BUILD_LOGFILE}" ]; then
+    chown "${BUILDRESULTUID}:${BUILDRESULTGID}" "${PBUILDER_BUILD_LOGFILE}"
+    chgrp "${BUILDRESULTGID}" "${PBUILDER_BUILD_LOGFILE}"
+fi
+
+cross_build_setup
+recover_aptcache
+createbuilduser
+CCACHE_ENV=
+setup_ccache
+SUTOUSER="$CCACHE_ENV $SUTOUSER"
+log.i "Copying source file"
+copydsc "$PACKAGENAME" "${BUILDPLACE}$BUILDDIR"
+copyinputfile "${BUILDPLACE}$BUILDDIR"
+
+# don't allow empty values of BUILDSUBDIR
+if package_version_is_older_than dpkg-dev 1.13.19; then
+        # dpkg-source back then (2005-06-12) didn't allow to specify the
+        # extraction directory.
+        if [ -n "${BUILDSUBDIR:-}" ]; then
+            log.w "dpkg is too old in the chroot, can't use the specified BUILDSUBDIR"
+        fi
+        cannot_change_subdir=yes
+        BUILDSUBDIR=
+fi
+# this really needs to be retested here, as BUILDSUBDIR *needs* to be set properly
+if [ -z "${BUILDSUBDIR:-}" ]; then
+    BUILDSUBDIR="$(dsc_get_basename "$PACKAGENAME" "no")"
+    BUILDSUBDIR="${BUILDSUBDIR//_/-}"
+fi
+
+log.i "Extracting source"
+if echo "chown $BUILDUSERNAME:$BUILDUSERNAME $BUILDDIR $BUILDDIR/*" | $CHROOTEXEC /bin/bash; then
+    : # success
+else
+    log.e "pbuilder: Failed chowning to $BUILDUSERNAME:$BUILDUSERNAME"
+    exit 1;
+fi
+if echo "( cd $BUILDDIR; env PATH=\"$PATH\" dpkg-source -x $(basename "$PACKAGENAME") $( [ -z "$cannot_change_subdir" ] && echo "$BUILDSUBDIR") )" | $UNSHARE $CHROOTEXEC env $SUTOUSER ; then
+    : # success
+else
+    log.e "pbuilder: Failed extracting the source"
+    exit 1;
+fi
+
+RRR="$(get822field Rules-Requires-Root "$BUILDPLACE/$BUILDDIR/$BUILDSUBDIR/debian/control")"
+if [[ "${RRR,,}" != no ]] || package_version_is_older_than dpkg-dev 1.19.0; then
+    if package_version_is_older_than dpkg-dev  1.14.7 ; then
+        DEBBUILDOPTS="${DEBBUILDOPTS:+$DEBBUILDOPTS }-rfakeroot"
+    fi
+    EXTRAPACKAGES="${EXTRAPACKAGES} fakeroot"
+    log.i "using fakeroot in build."
+else
+    log.i "Not using root during the build."
+fi
+
+log.i "Installing the build-deps"
+executehooks "D"
+trap saveaptcache_umountproc_cleanbuildplace_trap exit sighup sigpipe
+checkbuilddep "$PACKAGENAME"
+save_aptcache
+trap umountproc_cleanbuildplace_trap exit sighup sigpipe
+
+# This potentially gets modified by binNMU so must come first
+CHANGES_BASENAME=$(dsc_get_basename "$PACKAGENAME" "yes")
+
+binNMU
+
+log.i "Building the package"
+
+executehooks "A"
+
+ENV_PREFIX="env PATH=\"$PATH\" HOME=\"$BUILD_HOME\""
+DPKG_COMMANDLINE="$ENV_PREFIX dpkg-buildpackage -us -uc $DEBBUILDOPTS"
+
+if [ "${SOURCE_ONLY_CHANGES}" = "yes" ]; then
+    DPKG_COMMANDLINE="$DPKG_COMMANDLINE && $ENV_PREFIX dpkg-genchanges -S $(get_changes_options) > ../${CHANGES_BASENAME}_source.changes"
+fi
+
+# https://launchpad.net/bugs/816556
+unset DISPLAY
+
+if [ "$USENETWORK" = "no" ]; then
+    # empty /etc/resolv.conf, so software trying to resolv addresses even when
+    # no network is possible doesn't choke.
+    rm -f "$BUILDPLACE/etc/resolv.conf" # break hardlinks
+    : > "$BUILDPLACE/etc/resolv.conf"
+    # loopback access only
+    rm -f "$BUILDPLACE/etc/hosts" # break hardlinks
+
+    etchostslines=(
+        "127.0.0.1 localhost localhost.localdomain"
+        "127.0.1.1 $(hostname -f) $(hostname)"
+        "::1     ip6-localhost ip6-loopback localhost6 localhost6.localdomain6"
+        "fe00::0 ip6-localnet"
+        "ff00::0 ip6-mcastprefix"
+        "ff02::1 ip6-allnodes"
+        "ff02::2 ip6-allrouters"
+        "ff02::3 ip6-allhosts"
+    )
+    printf '%s\n' "${etchostslines[@]}" >> "$BUILDPLACE/etc/hosts"
+fi
+
+(
+    : Build process
+    if [ -n "$TWICE" ]; then
+        DPKG_COMMANDLINE="$DPKG_COMMANDLINE && $DPKG_COMMANDLINE"
+    fi
+    DPKG_COMMANDLINE="cd ${BUILDDIR}/$BUILDSUBDIR/ && $DPKG_COMMANDLINE"
+    log.i "Running $DPKG_COMMANDLINE"
+    echo "$DPKG_COMMANDLINE" | $UNSHARE $CHROOTEXEC env $SUTOUSER
+) &
+BUILD_PID=$!
+if [ -n "${TIMEOUT_TIME}" ]; then
+    (
+        : Timeout process
+        sleep "${TIMEOUT_TIME}"
+        log.i "Terminating build process due to timeout "
+        kill "${BUILD_PID}" || true
+    ) & # timeout process
+    KILL_WAIT_PID="kill $! || true; echo \"I: Terminate timeout process\"; "
+else
+    KILL_WAIT_PID=""
+fi
+
+if ! wait "${BUILD_PID}"; then
+    trap umountproc_cleanbuildplace_trap exit sighup sigpipe
+    eval "${KILL_WAIT_PID}"
+    if [ "$USENETWORK" = "no" ]; then
+        copy_local_configuration resolv.conf
+    fi
+    log.e "Failed autobuilding of package"
+    if [ -d "${BUILDRESULT}" ]; then
+        export_additional_buildresults
+    else
+        log.e "BUILDRESULT=[$BUILDRESULT] is not a directory."
+    fi
+    executehooks "C"
+    exit 1;
+else
+    eval ${KILL_WAIT_PID}
+    # build was successful
+fi
+
+if [ "$USENETWORK" = "no" ]; then
+    copy_local_configuration resolv.conf
+fi
+
+CHANGES_ARCHITECTURE=${HOST_ARCH:-$($CHROOTEXEC dpkg-architecture -qDEB_HOST_ARCH)}
+
+# dpkg pre-1.18.8 generated _$arch.changes even for indep-only builds,
+# so search for both.
+INDEP_CHANGES_FILE="${BUILDPLACE}$BUILDDIR/${CHANGES_BASENAME}_all.changes"
+if [ "${BINARY_ARCH}" = "all" -a -f "${INDEP_CHANGES_FILE}" ]; then
+    ARCH_CHANGES_FILE="$INDEP_CHANGES_FILE"
+else
+    ARCH_CHANGES_FILE="${BUILDPLACE}$BUILDDIR/${CHANGES_BASENAME}_${CHANGES_ARCHITECTURE}.changes"
+
+    if [ ! -f "${ARCH_CHANGES_FILE}" ]; then
+        log.e "Missing changes file: ${ARCH_CHANGES_FILE}"
+        exit 1
+    fi
+fi
+
+SOURCE_CHANGES_FILE="${BUILDPLACE}$BUILDDIR/${CHANGES_BASENAME}_source.changes"
+
+if [ "${SOURCE_ONLY_CHANGES}" = "yes" -a ! -f "${SOURCE_CHANGES_FILE}" ]; then
+    log.e "Missing source-only changes file: ${SOURCE_CHANGES_FILE}"
+    exit 1
+fi
+
+executehooks "B"
+
+if [ -d "${BUILDRESULT}" ]; then
+    chown "${BUILDRESULTUID}:${BUILDRESULTGID}" "${BUILDPLACE}$BUILDDIR/"*
+    chgrp "${BUILDRESULTGID}" "${BUILDPLACE}$BUILDDIR/"*
+    if [ "${SOURCE_ONLY_CHANGES}" = "yes" ]; then
+        FILES=$( ( get822files "changes" "$ARCH_CHANGES_FILE" && get822files "changes" "$SOURCE_CHANGES_FILE" ) | sort -u)
+    else
+        FILES=$(get822files "changes" "$ARCH_CHANGES_FILE")
+    fi
+    while read -r FILE; do
+        if [ -f "${FILE}" ]; then
+            cp -p "${FILE}" "${BUILDRESULT}" || true
+        fi
+    done <<< "${FILES}"
+    export_additional_buildresults
+    executehooks "I"
+else
+    log.e "BUILDRESULT=[$BUILDRESULT] is not a directory."
+fi
+
+# final cleanup
+trap umountproc_cleanbuildplace_trap exit sighup sigpipe
+save_aptcache
+trap cleanbuildplace_trap exit sighup sigpipe
+umountproc
+:
+cleanbuildplace
+trap - exit sighup sigpipe
+echobacktime
+exit 0

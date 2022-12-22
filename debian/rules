@@ -1,0 +1,20 @@
+#!/usr/bin/make -f
+export DH_VERBOSE=1
+
+%:
+	dh $@
+
+execute_before_dh_clean:
+ifneq ($(shell dpkg-vendor --derives-from ubuntu && echo true),true)
+	debconf-updatepo
+else
+	sed "s#http://deb.debian.org/debian#http://archive.ubuntu.com/ubuntu#g" -i debian/po/* -r
+	sed "s#http://deb.debian.org/debian#http://archive.ubuntu.com/ubuntu#g" -i debian/pbuilder.templates
+	sed "s#http://deb.debian.org/debian#http://archive.ubuntu.com/ubuntu#g" -i debian/pbuilder.config
+	sed "s#http://deb.debian.org/debian#http://archive.ubuntu.com/ubuntu#g" -i pbuilderrc
+	sed "s/#DISTRIBUTION=sid/DISTRIBUTION=devel/" -i pbuilderrc
+	sed 's/COMPONENTS="main"/COMPONENTS="main universe"/' -i pbuilderrc
+endif
+
+override_dh_compress:
+	dh_compress -X.pdf

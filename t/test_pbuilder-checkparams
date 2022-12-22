@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# testsuite for pbuilder-checkparams
+
+TD="$(dirname "$0")"
+. "$TD/testlib.sh"
+if [ -n "$PBUILDER_CHECKOUT" ]; then
+    PBUILDER_CHECKPARAMS="$PBUILDER_CHECKOUT/pbuilder-checkparams"
+else
+    PBUILDER_CHECKPARAMS="$PBUILDER_TEST_PKGLIBDIR/pbuilder-checkparams"
+fi
+
+# setup a fake installed environment
+trap testlib_cleanup_env sigpipe sighup exit
+testlib_setup_env
+
+test_debuildopts() {
+    . "$PBUILDER_CHECKPARAMS"
+    echo "$DEBBUILDOPTS"
+}
+
+expect_output "" \
+    test_debuildopts foo.dsc
+expect_output "" \
+    test_debuildopts --debbuildopts "" foo.dsc
+expect_output "-v1.0 -efoo" \
+    test_debuildopts --debbuildopts "-v1.0 -efoo" foo.dsc
+expect_output "-v1.0 -efoo" \
+    test_debuildopts --debbuildopts -v1.0 --debbuildopts -efoo foo.dsc
+expect_output "-efoo" \
+    test_debuildopts --debbuildopts -v1.0 --debbuildopts "" --debbuildopts -efoo foo.dsc
+
+testlib_summary

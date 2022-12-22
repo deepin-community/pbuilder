@@ -1,0 +1,131 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#               2015      Mattia Rizzolo <mattia@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+set -e
+
+export PBUILDER_OPERATION="pdebuild"
+export PBCURRENTCOMMANDLINEOPERATION="pdebuild"
+. /usr/lib/pbuilder/pdebuild-checkparams
+
+while ! test -d ./debian -o "$(pwd)" = "/" ; do
+    cd ..;
+done
+
+if test ! -d ./debian; then
+    log.e "Cannot find ./debian dir"
+    exit 1
+fi;
+
+PKG_SOURCENAME=$(dpkg-parsechangelog|sed -n 's/^Source: //p')
+PKG_VERSION=$(dpkg-parsechangelog|sed -n 's/^Version: \(.*:\|\)//p')
+ARCHITECTURE="${ARCHITECTURE:-$(dpkg-architecture -qDEB_HOST_ARCH)}"
+CHANGES="${PKG_SOURCENAME}_${PKG_VERSION}_${ARCHITECTURE}.changes"
+SOURCE_CHANGES="${PKG_SOURCENAME}_${PKG_VERSION}_source.changes"
+DSC="${PKG_SOURCENAME}_${PKG_VERSION}.dsc"
+
+if [ -z "${PBUILDER_BUILD_LOGFILE}" ]; then
+    PBUILDER_BUILD_LOGFILE="../${PKG_SOURCENAME}_${PKG_VERSION}_${ARCHITECTURE}.build"
+    exec > >(tee "${PBUILDER_BUILD_LOGFILE}") 2>&1
+fi
+
+
+BUILDRESULTUID=$(id -u)
+BUILDRESULTGID=$(id -g)
+export BUILDRESULTUID BUILDRESULTGID
+
+if [ "${USE_PDEBUILD_INTERNAL}" = 'yes' ]; then
+    ${PBUILDERROOTCMD} \
+        ${PDEBUILD_PBUILDER} \
+        --execute \
+        ${EXTRA_CONFIGFILE[@]/#/--configfile } \
+        --bindmounts "$(readlink -f ..)" \
+        "$@" \
+        -- \
+        /usr/lib/pbuilder/pdebuild-internal \
+        "${PWD}" \
+        --debbuildopts "" \
+        --debbuildopts "${DEBBUILDOPTS}" \
+        --uid "${BUILDRESULTUID}" \
+        --gid "${BUILDRESULTGID}" \
+        --pbuildersatisfydepends "$PBUILDERSATISFYDEPENDSCMD"
+    if [ -d "${BUILDRESULT}" ]; then
+        for files in $(sed -rn '/^Files:/,${s/^ .* ([^ ]+)$/\1/p}' ../${CHANGES}); do
+            conditional_cp_a ../"$files" "${BUILDRESULT}"
+        done
+        conditional_cp_a "../${CHANGES}" "${BUILDRESULT}"
+        for files in "${ADDITIONAL_BUILDRESULTS[@]}"; do
+            log.i "Trying to save additional result ${files}"
+            conditional_cp_a "${files}" "${BUILDRESULT}" || true
+        done
+    else
+        log.e "BUILDRESULT=[$BUILDRESULT] is not a directory."
+        exit 1
+    fi
+else
+    if ! dpkg-checkbuilddeps -B ; then
+        log.w "Unmet build-dependency in source"
+    fi
+    # get_changes_options/get_source_options single-quote each element, so an
+    # eval is needed to reverse that.
+    SOURCE_OPTIONS=$(get_source_options)
+    eval dpkg-source ${SOURCE_OPTIONS} --before-build .
+    if should_clean_source; then
+        "${BUILDSOURCEROOTCMD}" debian/rules clean
+    fi
+    eval dpkg-source ${SOURCE_OPTIONS} -b .
+    if ! [ "../${DSC}" -ef "${BUILDRESULT}/${DSC}" ]; then
+        log.i "Generating source changes file for original dsc"
+        eval dpkg-genchanges -S $(get_changes_options) > "../${SOURCE_CHANGES}"
+    else
+        log.i "Generated dsc will be overwritten by build result; not generating changes file"
+    fi
+    eval dpkg-source ${SOURCE_OPTIONS} --after-build .
+    ${PBUILDERROOTCMD} \
+        ${PDEBUILD_PBUILDER} \
+        --build \
+        ${EXTRA_CONFIGFILE[@]/#/--configfile } \
+        --buildresult "${BUILDRESULT}" \
+        --debbuildopts "" \
+        --debbuildopts "${DEBBUILDOPTS}" \
+        "$@" \
+        ../"${PKG_SOURCENAME}_${PKG_VERSION}".dsc
+fi
+
+# do signing with optional key specifier
+if [ "${AUTO_DEBSIGN}" = "yes" ]; then
+    unset DEBSIGN_PARAM || true
+    declare -a DEBSIGN_PARAM
+    if [ -n "${DEBSIGN_KEYID}" ]; then
+        DEBSIGN_PARAM[${#DEBSIGN_PARAM[@]}]="-k${DEBSIGN_KEYID}"
+    fi
+    DEBSIGN_PARAM[${#DEBSIGN_PARAM[@]}]="--no-re-sign"
+    DEBSIGN_PARAM[${#DEBSIGN_PARAM[@]}]="--"
+    for file in "$BUILDRESULT/$CHANGES" "$BUILDRESULT/$SOURCE_CHANGES"; do
+        if [ -f "$file" ]; then
+            DEBSIGN_PARAM[${#DEBSIGN_PARAM[@]}]="$file"
+            found=yes
+        fi
+    done
+    if [ -z "${found:-}" ]; then
+        log.e "No .changes file(s) can be found; debsign not done."
+        exit 1
+    fi
+    debsign "${DEBSIGN_PARAM[@]}"
+fi

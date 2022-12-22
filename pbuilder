@@ -1,0 +1,183 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#               2015-2016 Mattia Rizzolo <mattia@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+set -e
+
+umask 0022
+
+case "$1" in
+    --create|create)
+        shift
+        export PBUILDER_OPERATION="create"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        /usr/lib/pbuilder/pbuilder-createbuildenv "$@"
+        ;;
+    --update|update|up|u)
+        shift
+        export PBUILDER_OPERATION="update"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        /usr/lib/pbuilder/pbuilder-updatebuildenv "$@"
+        ;;
+    --build|build|b)
+        shift
+        export PBUILDER_OPERATION="build"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        /usr/lib/pbuilder/pbuilder-buildpackage "$@"
+        ;;
+    --clean|clean)
+        shift
+        export PBUILDER_OPERATION="clean"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        . /usr/lib/pbuilder/pbuilder-checkparams
+        if [ -n "$BASEBUILDPLACE" ]; then
+            log.i "Cleaning [$BASEBUILDPLACE]"
+            clean_subdirectories "$BASEBUILDPLACE" || true
+        fi
+        if [ -n "$APTCACHE" ]; then
+            log.i "Cleaning [$APTCACHE]"
+            rm -f "$APTCACHE"/* || true
+        fi
+        ;;
+    --login|login|l)
+        shift
+        export PBUILDER_OPERATION="login"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        . /usr/lib/pbuilder/pbuilder-checkparams
+        extractbuildplace
+        trap umountproc_cleanbuildplace_trap exit sighup
+        copyinputfile "${BUILDPLACE}$BUILDDIR"
+        recover_aptcache
+        trap saveaptcache_umountproc_cleanbuildplace_trap exit sighup
+
+        if [ "${INTERNAL_BUILD_UML}" = "yes" ]; then
+            log.i "entering the shell"
+        else
+            log.i "entering the shell"
+            log.i "File extracted to: $BUILDPLACE"
+        fi
+
+        executehooks "F"
+        (${CHROOTEXEC} bash -c 'exec -a -bash bash')
+        RET=$?
+
+        save_aptcache
+
+        trap umountproc_cleanbuildplace_trap exit sighup
+
+        # saving the place afterwards
+        if [ "${SAVE_AFTER_LOGIN}" = "yes" ]; then
+            if [ "${INTERNAL_BUILD_UML}" = "yes" ]; then
+                log.e "Invalid combination of internal-build-uml and save-after-login flags"
+                exit 1
+            else
+                log.i "Saving the results, modifications to this session will persist"
+                umountproc
+                trap cleanbuildplace_trap exit sighup
+                ${CHROOTEXEC} apt-get clean || true
+                create_basetgz
+                cleanbuildplace
+                trap - exit sighup
+                exit $RET
+            fi
+        fi
+        umountproc_cleanbuildplace
+        trap - exit sighup
+        exit $RET
+        ;;
+    --execute|execute|e)
+        # try to execute arbitrary program.
+        shift
+        export PBUILDER_OPERATION="execute"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        . /usr/lib/pbuilder/pbuilder-checkparams
+        EXECPROGRAM="$1"
+        shift
+        if [ ! -f "${EXECPROGRAM}" ]; then
+            log.e "Command line parameter [$EXECPROGRAM] does not exist"
+            exit 1
+        fi
+        extractbuildplace
+
+        trap umountproc_cleanbuildplace_trap exit sighup
+        copyinputfile "${BUILDPLACE}$BUILDDIR"
+        recover_aptcache
+        trap saveaptcache_umountproc_cleanbuildplace_trap exit sighup
+
+        RUNNAME="$BUILDPLACE/runscript"
+        cat "$EXECPROGRAM" > "$RUNNAME"
+        chmod a+x "$RUNNAME"
+        executehooks "F"
+        ( ${CHROOTEXEC} /runscript "$@" )
+        RET=$?
+        rm -f "$RUNNAME"
+
+        save_aptcache
+        trap umountproc_cleanbuildplace_trap exit sighup
+
+        # saving the place afterwards
+        if [ "${SAVE_AFTER_LOGIN}" = "yes" ]; then
+            if [ "${INTERNAL_BUILD_UML}" = "yes" ]; then
+                log.e "Invalid combination of internal-build-uml and save-after-login flags"
+                exit 1
+            else
+                log.i "Saving the results, modifications to this session will persist"
+                umountproc
+                trap cleanbuildplace_trap exit sighup
+                ${CHROOTEXEC} apt-get clean || true
+                create_basetgz
+                cleanbuildplace
+                trap - exit sighup
+                exit $RET
+            fi
+        fi
+        umountproc_cleanbuildplace
+        trap - exit sighup
+        exit $RET
+        ;;
+    --dumpconfig|dumpconfig)
+        shift
+        export PBUILDER_OPERATION="dumpconfig"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        . /usr/lib/pbuilder/pbuilder-checkparams
+        log.i "start dump config"
+        log.i "(set -o posix; set)"
+        (set -o posix; set)
+        log.i "env"
+        env
+        log.i "end dump config"
+        ;;
+    --debuild|debuild)
+        shift
+        export PBUILDER_OPERATION="debuild"
+        export PBCURRENTCOMMANDLINEOPERATION="$PBUILDER_OPERATION"
+        "$0" execute "$@" /usr/lib/pbuilder/pdebuild-internal
+        ;;
+    --help|help|h)
+        . /usr/lib/pbuilder/pbuilder-modules
+        showhelp
+        exit 0
+        ;;
+    *)
+        . /usr/lib/pbuilder/pbuilder-modules
+        showhelp
+        exit 1
+        ;;
+esac
+

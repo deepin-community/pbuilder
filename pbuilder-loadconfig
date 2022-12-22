@@ -1,0 +1,44 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+export PBUILDER_PKGDATADIR="${PBUILDER_PKGDATADIR:-$PBUILDER_ROOT/usr/share/pbuilder}"
+export PBUILDER_SYSCONFDIR="${PBUILDER_SYSCONFDIR:-$PBUILDER_ROOT/etc}"
+
+for RCFILE in \
+    "$PBUILDER_PKGDATADIR"/pbuilderrc \
+    "$PBUILDER_SYSCONFDIR"/pbuilderrc \
+    "$HOME"/.pbuilderrc; do
+    # log() is not available
+    if [ -e "$RCFILE" ]; then
+        . "$RCFILE" || ( echo "E: $RCFILE could not be loaded" >&2 ; exit 1 )
+    else
+        echo "W: $RCFILE does not exist" >&2
+    fi
+    # deprecated in v0.216
+    if [ -n "$PKGNAME_LOGFILE_EXTENTION" ] ; then
+        echo "W: The configuration option PKGNAME_LOGFILE_EXTENTION is deprecated in favour of PKGNAME_LOGFILE_EXTENSION. Though, while you have the former set it'll take precedence over the latter."
+        echo "W: PKGNAME_LOGFILE_EXTENTION will be removed at some point, please update your config!"
+        PKGNAME_LOGFILE_EXTENSION="$PKGNAME_LOGFILE_EXTENTION"
+    fi
+    # deprecated in v0.228
+    if [ -n "${USERUNSHM-}" ]; then
+        # wait some more before warning about this deprecation
+        USESHM="$USERUNSHM"
+    fi
+done

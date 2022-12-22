@@ -1,0 +1,7 @@
+Tests: unit-tests
+Depends: @
+Restrictions: allow-stderr
+
+Tests: build-procenv
+Depends: @, distro-info, lsb-release
+Restrictions: needs-root

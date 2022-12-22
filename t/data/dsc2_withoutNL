@@ -1,0 +1,36 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+Format: 3.0 (quilt)
+Source: golang-xmpp-dev
+Binary: golang-xmpp-dev
+Architecture: all
+Version: 0.0~git20140304-1
+Maintainer: Jacob Appelbaum <jacob@appelbaum.net>
+Homepage: https://www.github.com/agl/xmpp
+Standards-Version: 3.9.5
+Build-Depends: debhelper (>= 9)
+Package-List: 
+ golang-xmpp-dev deb devel extra
+Checksums-Sha1: 
+ 2175fd06e8fcf9787044036837f21b7e6c3d2ceb 10040 golang-xmpp-dev_0.0~git20140304.orig.tar.gz
+ 72b5180710909e30208627bd77dd899751475309 2208 golang-xmpp-dev_0.0~git20140304-1.debian.tar.xz
+Checksums-Sha256: 
+ 41805d983433423eb967628c43f033a19f6c8363c3d40a5931a5eb28f4e9133c 10040 golang-xmpp-dev_0.0~git20140304.orig.tar.gz
+ 54f49f52c2c1399c8262afc582e1ce38ef99cd4d95cd06f9350a91960176a925 2208 golang-xmpp-dev_0.0~git20140304-1.debian.tar.xz
+Files: 
+ a00613a2e965c11c9713268c25486a1b 10040 golang-xmpp-dev_0.0~git20140304.orig.tar.gz
+ e5bc6c49ca86922344531418dee9e5dd 2208 golang-xmpp-dev_0.0~git20140304-1.debian.tar.xz
+-----BEGIN PGP SIGNATURE-----
+
+iQGVAwUBUxYUR1kMfZESRfeDAQgvCwv8CM7a+LcQQnk5Gil3jHHlr4EO6NvuDMpW
+4+yviAFZCmOVq3poUKYpojNNtIBPSGh2+POEOZu+6h1rQxQpPeiqrIteS4pMhR7s
+bptUqqAbRH/Yy9pcmPOf+yDeeGAr/xaga9vvankdn60Q5D7Xk85Bhl6a3KucCwGA
+h5s/ywDXZVOtjqywoB+zR5Jd2kuhjJUUdnUxTvVrw+rZXaKcwgAM1zUv6Tqkdkij
+NRJFW5p17c1gg0v7KvWcCJoNcF5Mn1avnTF7OhZm5ODreM9kgpcd+8yuG3n6j/Ey
+o4E6p2Tf5wTQ2t44OaU1uu8+0mjPhDxfEjGKcdThWQyrqO0hkGAfLkubLGRB4EZo
+dcWK+KNxOR5HzgQGJw+rEGn/x7kcQtdDeXn3EsHeAhJscicdbJW9nCM47+PLM7Pn
+B3WfTzfwrzVC/IcSM1303chIW0dfsMTCP0ubFZOqoMMflSKRPiJ3vPvJFFzmrS31
+M4EDxlS+nvAHZbzQ49QGnU/dMocDzvAH
+=XSwB
+-----END PGP SIGNATURE-----

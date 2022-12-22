@@ -1,0 +1,105 @@
+#!/bin/sh
+set -eu
+
+#---------------------------------------------------------------------
+# Creates a pbuilder chroot, builds a package, installs the resulting
+# .deb, then runs the command provided by the .deb.
+#---------------------------------------------------------------------
+
+die()
+{
+    msg="$*"
+    echo "ERROR: $msg" >&2
+    exit 1
+}
+
+# The package we'll ask pbuilder to build (we know its buildable since
+# it's already in the archive :-))
+#
+# The advantage of choosing this particular package being that it runs
+# *itself* at the end of its build.
+pkg=procenv
+
+resultdir=/var/cache/pbuilder/result
+
+# Avoid conflict with ADT
+unset TMPDIR
+
+distro=$(lsb_release --id --short|tr '[:upper:]' '[:lower:]' || :)
+[ -z "$distro" ] && die "cannot establish distribution"
+arch=$(dpkg --print-architecture 2>/dev/null)
+[ -z "$arch" ] && die "cannot establish architecture"
+host_release=$(lsb_release --codename --short || :)
+[ -z "$host_release" ] && die "cannot establish release running on host"
+
+if [ "$distro" = debian ] ; then
+    release=$(distro-info --testing)
+    components="main"
+    mirror="http://cloudfront.debian.net/debian"
+elif [ "$distro" = ubuntu ] ; then
+    case "$arch" in
+        amd64|i386) mirror="http://archive.ubuntu.com/ubuntu" ;;
+        *) mirror="http://ports.ubuntu.com" ;;
+    esac
+    release=$(distro-info --devel)
+    components="main universe"
+else
+    die "need to know where archive is for distro '$distro' on arch '$arch'"
+fi
+
+# Have to redirect stderr to avoid ADT thinking the test has failed
+# (the return code is still being checked, so this seems reasonable).
+echo "INFO: Creating pbuilder chroot for release '$release'"
+echo "+ pbuilder --create --debug --distribution '$release' --components '$components' --debootstrapopts --mirror '$mirror'"
+pbuilder --create --debug \
+    --distribution "$release" \
+    --components "$components" \
+    --mirror "$mirror" 2>&1
+
+if [ ! -d "$resultdir" ] ; then
+    die "cannot find directory $resultdir"
+fi
+
+# Use '--download-only' to avoid unpack which generates a
+# signature warning to stderr, causing this test to fail.
+echo "INFO: Adding deb-src line in /etc/apt/sources.list for the '$release' release"
+echo "deb-src $mirror $release $components" > /etc/apt/sources.list
+apt-get -o APT::Sandbox::User=root update
+echo "INFO: Downloading source for package '$pkg' release '$release'"
+apt-get -o APT::Sandbox::User=root source --download-only "$pkg/$release"
+
+dsc=$(ls ${pkg}*.dsc)
+
+echo "INFO: Building package '$pkg' for release '$release' from '$dsc'"
+pbuilder --build --debug "$dsc" 2>&1
+
+pkg_and_version=$(echo "$dsc"|sed 's/\.dsc$//g')
+deb=${resultdir}/${pkg_and_version}_${arch}.deb
+
+# Do what we can to check if the .deb looks usable (since we may not
+# be able to install it to test it properly)
+echo "INFO: Listing information on '$deb'"
+dpkg --info "$deb"
+
+echo "INFO: Listing contents of '$deb'"
+dpkg --contents "$deb"
+
+extract="$AUTOPKGTEST_TMP/extract"
+echo "INFO: Extracting '$deb' to '$extract'"
+dpkg --extract "$deb" "$extract"
+
+echo "INFO: Trying to install package '$pkg' from '$deb'"
+echo "INFO: (this might not succeed, that's not a bug)"
+if dpkg -i "$deb" 2>&1 ; then
+    # run the command to prove the build worked but also to expose the
+    # auto-package-test environment used for this test.
+    cmd=$pkg
+    echo "INFO: Showing AutoPkgTest environment by running '$cmd' from package '$pkg'"
+    "$cmd"
+else
+    echo "INFO: The install step failed. This can be expected if the host release is different than our target."
+    echo "host release: $host_release"
+    echo "target release: $release"
+fi
+
+echo "INFO: SUCCESS"

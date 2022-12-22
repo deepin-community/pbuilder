@@ -1,0 +1,88 @@
+# Turkish translation of pbuilder package
+# Copyright (C) 2014 Mert Dirik
+# This file is distributed under the same license as the pbuilder package.
+# Mert Dirik <mertdirik@gmail.com>, 2014.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: pbuilder 0.215+nmu3\n"
+"Report-Msgid-Bugs-To: pbuilder@packages.debian.org\n"
+"POT-Creation-Date: 2008-03-07 00:09+0900\n"
+"PO-Revision-Date: 2014-08-01 17:11+0200\n"
+"Last-Translator: Mert Dirik <mertdirik@gmail.com>\n"
+"Language-Team: Debian L10n Turkish <debian-l10n-turkish@lists.debian.org>\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 1.5.4\n"
+
+#. Type: string
+#. Description
+#: ../pbuilder.templates:1001
+msgid "Default mirror site:"
+msgstr "Öntanımlı yansı sitesi:"
+
+#. Type: string
+#. Description
+#: ../pbuilder.templates:1001
+msgid "Please enter the default mirror you want to be used by pbuilder."
+msgstr ""
+"Lütfen pbuilder tarafından kullanılmasını istediğiniz öntanımlı yansıyı "
+"girin."
+
+#. Type: string
+#. Description
+#: ../pbuilder.templates:1001
+msgid ""
+"If you leave this field blank, there will be one attempt to autodetect this "
+"information. If this attempt fails, you will be prompted again to insert "
+"some valid mirror information."
+msgstr ""
+"Burayı boş bıraktığınız takdirde bu bilgiyi otomatik olarak algılamak için "
+"bir denemede bulunulacaktır. Bu deneme başarısız olursa geçerli bir yansı "
+"girmeniz için size bir istemde daha bulunulacaktır."
+
+#. Type: string
+#. Description
+#: ../pbuilder.templates:1001
+msgid "Here is a valid mirror example: http://deb.debian.org/debian"
+msgstr "Geçerli bir yansı örneği şu şekildedir: http://deb.debian.org/debian"
+
+#. Type: error
+#. Description
+#: ../pbuilder.templates:2001
+msgid "Default mirror not found"
+msgstr "Öntanımlı yansı bulunamadı"
+
+#. Type: error
+#. Description
+#: ../pbuilder.templates:2001
+msgid ""
+"Mirror information detection failed and the user provided no mirror "
+"information."
+msgstr ""
+"Yansı bilgisi algılama başarısız oldu ve kullanıcı yansı bilgisi girmedi."
+
+#. Type: error
+#. Description
+#: ../pbuilder.templates:2001
+msgid "Please enter valid mirror information."
+msgstr "Lütfen geçerli bir yansı bilgisi girin."
+
+#. Type: boolean
+#. Description
+#: ../pbuilder.templates:3001
+msgid "Overwrite current configuration?"
+msgstr "Mevcut yapılandırmanın üzerine yazılsın mı?"
+
+#. Type: boolean
+#. Description
+#: ../pbuilder.templates:3001
+msgid ""
+"Your system seems to have already pbuilder configuration. Proceeding might "
+"discard or overwrite part or the entire pbuilder's configuration."
+msgstr ""
+"Sisteminizde halihazırda bir pbuilder yapılandırması bulunuyor. Devam "
+"etmeniz halinde pbuilder mevcut yapılandırmasının bir kısmı ya da tamamı "
+"silinebilir, atılabilir ya da değiştirilebilir."

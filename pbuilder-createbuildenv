@@ -1,0 +1,139 @@
+#! /bin/bash
+#   pbuilder -- personal Debian package builder
+#   Copyright © 2001-2007 Junichi Uekawa <dancer@debian.org>
+#               2015      Mattia Rizzolo <mattia@debian.org>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+###############################################################################
+
+set -e 
+
+. "${BASH_SOURCE%/*}/pbuilder-checkparams"
+
+if [ -z "$DISTRIBUTION" ]; then
+    DISTRIBUTION=sid
+fi
+log.i "Distribution is $DISTRIBUTION."
+
+if [ "${PBUILDER_DEBUGMODE}" = "yes" ]; then
+    TRAP="echo ignoring trap "
+else
+    TRAP=trap
+fi
+
+# show the current time before doing anything.
+echobacktime
+
+# first clean it.
+cleanbuildplace
+
+log.i "Building the build environment"
+mkdir -p "$BUILDPLACE"
+if [ ! -d "$BUILDPLACE" ]; then
+    log.e "Could not make directory [$BUILDPLACE]"
+    exit 1
+fi
+
+$TRAP cleanbuildplace exit
+
+log.i "running $DEBOOTSTRAP"
+unset DEBOOTSTRAPSCRIPT
+if [ -n "$HOOKDIR" ]; then
+    if [ -f "$HOOKDIR/$DISTRIBUTION" ]; then
+	DEBOOTSTRAPSCRIPT=$(readlink -f "$HOOKDIR")"/$DISTRIBUTION"
+	log.i "Applying user distribution dist build script $DEBOOTSTRAPSCRIPT"
+    fi
+fi
+
+if which "${DEBOOTSTRAP}"; then
+    : # debootstrap exists
+else
+    log.e "${DEBOOTSTRAP} does not exist, install or change DEBOOTSTRAP option"
+    exit 1
+fi
+
+# use cache for debootstrap
+if [ -n "$APTCACHE" ] && [ "${DEBOOTSTRAP}" = debootstrap -o "${DEBOOTSTRAP}" = qemu-debootstrap ]; then
+    USE_CACHE="--cache-dir=$APTCACHE"
+fi
+
+# FIXME if the end-user passes another --include= to debootstrap in
+# DEBOOTSTRAPOPTS, it will override the --include=apt one and apt might not be
+# installed
+if ! ( "${DEBOOTSTRAP}" \
+    ${ARCHITECTURE:+--arch=$ARCHITECTURE} \
+    --include=apt \
+    ${USE_CACHE:+"$USE_CACHE"} \
+    "${DEBOOTSTRAPOPTS[@]}" \
+    "$DISTRIBUTION" \
+    "$BUILDPLACE" \
+    "$MIRRORSITE" \
+    $DEBOOTSTRAPSCRIPT ) ; then
+    log.e "$DEBOOTSTRAP failed"
+    if [ -f "$BUILDPLACE/debootstrap/debootstrap.log" ]; then
+        log.e "Tail of debootstrap.log:"
+        tail -n 50 "$BUILDPLACE/debootstrap/debootstrap.log"
+        log.e "End of debootstrap.log"
+    else
+        log.e "debootstrap.log not present"
+    fi
+    exit 1
+fi
+
+log.i "debootstrap finished"
+
+
+mkdir -p "${BUILDPLACE}$BUILDDIR"
+
+copy_local_configuration
+installaptlines
+add_additional_aptkeyrings
+loadhooks
+executehooks "G"
+
+log.i "Refreshing the base.tgz "
+log.i "upgrading packages"
+mountproc
+$TRAP umountproc_cleanbuildplace_trap exit sighup
+$CHROOTEXEC apt-get -q "${APTGETOPT[@]}" update
+
+install_packages_for_optional_features
+
+if [ -n "$REMOVEPACKAGES" ]; then remove_packages $REMOVEPACKAGES ; fi
+recover_aptcache
+$CHROOTEXEC apt-get -q -y "${APTGETOPT[@]}" "${FORCE_CONFNEW[@]}" dist-upgrade
+$CHROOTEXEC apt-get -q -y "${APTGETOPT[@]}" install \
+    build-essential \
+    dpkg-dev \
+    $EXTRAPACKAGES
+save_aptcache
+
+executehooks "E"
+umountproc
+$CHROOTEXEC apt-get clean || true
+$TRAP cleanbuildplace_trap exit sighup
+
+# Internal_build_uml is set when --no-targz is set, this code is actually never called from pbuilder-user-mode-linux
+if [ ! "${INTERNAL_BUILD_UML}" = "yes" ]; then
+    create_basetgz
+fi
+if [ "${PRESERVE_BUILDPLACE}" = "yes" ]; then
+    :
+else
+    :
+    cleanbuildplace
+fi
+trap - exit sighup
+exit 0

@@ -1,0 +1,42 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Format: 3.0 (native)
+Source: cowdancer
+Binary: cowdancer, cowbuilder, qemubuilder
+Architecture: any
+Version: 0.82
+Maintainer: Debian pbuilder maintenance team <pbuilder-maint@lists.alioth.debian.org>
+Uploaders: James Clarke <jrtc27@jrtc27.com>, Mattia Rizzolo <mattia@debian.org>,
+Standards-Version: 3.9.8
+Vcs-Browser: https://anonscm.debian.org/git/pbuilder/cowdancer.git
+Vcs-Git: https://anonscm.debian.org/git/pbuilder/cowdancer.git
+Build-Depends: cpio, debhelper (>= 10), dh-exec, klibc-utils [linux-any], libklibc-dev [linux-any], libncurses-dev, pbuilder
+Package-List:
+ cowbuilder deb utils optional arch=any
+ cowdancer deb utils optional arch=any
+ qemubuilder deb utils optional arch=linux-any
+Checksums-Sha1:
+ 05438b1752994ac39a62491eb4ca7f10c6d3b13b 69428 cowdancer_0.82.tar.xz
+Checksums-Sha256:
+ 79614c398007b2934217a9547902b01c35d89cbf2639a518b6587d36c8c41cd3 69428 cowdancer_0.82.tar.xz
+Files:
+ efc191462239628c4e942886cd846ec3 69428 cowdancer_0.82.tar.xz
+
+-----BEGIN PGP SIGNATURE-----
+
+iQJGBAEBCgAwFiEEj1g0K+q+HvQ3lVH7sZN3DBhqHH0FAlhEuUwSHGpydGMyN0Bq
+cnRjMjcuY29tAAoJELGTdwwYahx9umsP/RMAJQLJNp+Q4i+CTIwsssIpOF4IuWQ9
+gn0ecHwKoW2etxO+dHGIfMFeWOa5HqazPIjJGLBq5vk0DgMm/XOi4/F4qeP9YDN/
+oTdNW26fKoU6NNSmoSUjXhupsIqsojcvNe17mQnWX9LLkyTvT0WvKp85ybBo2TCH
+VqtYlqV8L2Ozs1P+ZzNeoQPH7yTWx12RnIaOFjacBRLf78z8Jpzm45GA/7eQ/Zzk
+7YqJyr2DySGUBVvcRNijcjanKBLe1wqRcHDmLRaudvXuZGB6kvQ2PnKDt2btR0qw
+GK5PSvaiZVKhovp21+506KGGFx6Q5mfTQ2oFy32nQVuGPPoMcpPYqgJ1hOyfiPkK
+aXhSu4iyEzOcERESdRjt9A/enkRi6c42i776v2ANRW6I2GvB4bu0YMqgnPtoMwLC
+Jt7beTUpBbW4/F1O+VMgFrd0c7gCsH0IHZmpWbmByMUU/tiXUapN6FNHnDqS7OSq
+GXjUtupZvCZKRbTvQg9B4lO4JF8eBkOC5c1ZO5qvpLTtrjUIG7xx5E8gisNpgqkD
+gE1I+ZC1OF7bjgjnUyhHIWJPFTP0ae4yVGktAxH7h6BaUavzVStYjXc/+lXp+L3l
+daQ8UyWSp8nxd2PludeJ4yZcboxbHxuA4US6BpDtXr73ugepS0eWgYX72yHNIb96
+UfFacf2+7jwm
+=Y9MG
+-----END PGP SIGNATURE-----

@@ -1,0 +1,90 @@
+#!/bin/bash
+#   Copyright © 2015-2016 Mattia Rizzolo <mattia@debian.org>
+#
+#   pbuilder -- personal Debian package builder
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+#
+# module to satisfy build dependencies; apt flavor
+
+set -e
+
+export PBUILDER_PKGLIBDIR="${PBUILDER_PKGLIBDIR:-$PBUILDER_ROOT/usr/lib/pbuilder}"
+
+. "$PBUILDER_PKGLIBDIR"/pbuilder-satisfydepends-funcs
+
+function checkbuilddep_internal () {
+
+    # check whether apt is new enough
+    if package_version_is_older_than apt 1.4~beta3 ; then
+        log.e "APT is not new enough to be used by this dependency resolver."
+        log.e "Please switch to a different resolver."
+        exit 1
+    fi
+    log.i "-> Attempting to satisfy build-dependencies"
+    if [[ "$DEBIAN_CONTROL" = *.dsc ]]; then
+        local DIR="$DEBIAN_CONTROL"
+    elif [[ "$DEBIAN_CONTROL" = *control ]]; then
+        local DIR="${DEBIAN_CONTROL%/control}/../"
+    else
+        log.e "Format of \$DEBIAN_CONTROL not recognized ('$DEBIAN_CONTROL')"
+        exit 1
+    fi
+
+    case "$BINARY_ARCH" in
+        "binary")
+            APTGETOPT[${#APTGETOPT[@]}]='--arch-only'
+            ;;
+        "all")
+            APTGETOPT[${#APTGETOPT[@]}]='--indep-only'
+            ;;
+        "any")
+            ;;
+        *)
+            log.e "\$BINARY_ARCH contains a weird value [$BINARY_ARCH].  Giving up"
+            exit 1
+            ;;
+    esac
+
+    if [[ "$BUILD_ARCH" != "$HOST_ARCH" ]]; then
+        APTGETOPT[${#APTGETOPT[@]}]="--host-architecture=$HOST_ARCH"
+    fi
+
+    $CHROOTEXEC apt-get \
+        -y \
+        "${APTGETOPT[@]}" \
+        build-dep \
+        "$DIR"
+}
+
+
+function print_help () {
+    # print out help message
+    cat <<EOF
+pbuilder-satisfydepends -- satisfy dependencies
+
+--help:             give help
+--control <file>:   specify control file (debian/control, *.dsc) _inside the chroot_
+--chroot <chroot>:  operate inside this chroot
+--binary-all:       include binary-all
+--binary-arch:      include binary-arch only
+--host-arch <arch>: perform a cross-build targetting this architecture
+--echo:             echo mode, do nothing.
+
+EOF
+}
+
+. "$PBUILDER_PKGLIBDIR"/pbuilder-satisfydepends-checkparams
+

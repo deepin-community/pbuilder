@@ -1,0 +1,58 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Format: 1.8
+Date: Wed, 20 Jul 2016 20:27:55 +0000
+Source: pbuilder
+Binary: pbuilder
+Architecture: source all
+Version: 0.225.2~bpo8+1
+Distribution: jessie-backports
+Urgency: high
+Maintainer: Debian pbuilder maintenance team <pbuilder-maint@lists.alioth.debian.org>
+Changed-By: Mattia Rizzolo <mattia@debian.org>
+Description:
+ pbuilder   - personal package builder for Debian packages
+Closes: 831823
+Changes:
+ pbuilder (0.225.2~bpo8+1) jessie-backports; urgency=medium
+ .
+   * Rebuild for jessie-backports.
+   * Revert "pbuilderrc: add --force-check-gpg to DEBOOTSTRAPOPTS: this makes
+     debootstrap fail if the keyring is not available".
+     This option is not in jessie version of debootstrap.
+ .
+ pbuilder (0.225.2) unstable; urgency=high
+ .
+   [ James Clarke ]
+   * modules: Don't trash CHROOTEXEC when using eatmydata.  Closes: #831823
+Checksums-Sha1:
+ 6e11aa5aface3c9981108298d245403952ea5673 1843 pbuilder_0.225.2~bpo8+1.dsc
+ 9f0f8c821d5f3ae6d4da36e0acffe0f45a9c3631 307720 pbuilder_0.225.2~bpo8+1.tar.xz
+ 77118e5b6c716aac45db2245aba1ef5d87fcfe42 353256 pbuilder_0.225.2~bpo8+1_all.deb
+Checksums-Sha256:
+ 45089d41a1e458d6535b18f57fcd293a93ade3ab956e29b0d543668ae33b6c86 1843 pbuilder_0.225.2~bpo8+1.dsc
+ 7fe4913c9f5a484a757d458482a9dea2d60b12cf0e944bd4af7459df99c734e3 307720 pbuilder_0.225.2~bpo8+1.tar.xz
+ 22061403205a3c60506bb977285154ba3dd26311c0ec16cf40d3d5364fa23a6f 353256 pbuilder_0.225.2~bpo8+1_all.deb
+Files:
+ 25260bbd3d2768130aa234fdb8c25845 1843 devel extra pbuilder_0.225.2~bpo8+1.dsc
+ bcf648f66bf265d9efba327e9914cd85 307720 devel extra pbuilder_0.225.2~bpo8+1.tar.xz
+ 0dcfbbbcf3a56e69be1d48072a269a5c 353256 devel extra pbuilder_0.225.2~bpo8+1_all.deb
+
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1
+
+iQIcBAEBCgAGBQJXj+DgAAoJEEsEP825REVA8dIQAMmgS5JdUCrPVHIXiFtuGrFv
+nSksaMf/R+ZzoZtAIddx5EzJt9Tj59TE2s/jdvad8frelthjfgYJTCpMMZMnaS/e
+YC4U3nzvmR2qji23IRgommXtddCvFdcCZTpxLSDHyRfxQOXugSOkWYBsGfy226Py
+5UfnNFFwWMuc0tmv3dIMWx77iuZdnno+ziXqlk32ca5ZrcLAvdjmi6pB1Vsy+TiC
+zltFLrBaS8XzI+0ZDsWUg35a+MZnQL/K5Z+bJ+ucpjCZhqLAUaboG2KXZaQ3YZJ7
+m75662Pk6XBQ8eVYHkarCaIjlk+lSYTinxRmYypQPSAYGHaOQEY6JqAV0hOYLKQg
+YkdnazSuetusIftxCP+RVZgQHsRHGsRaeh0IMRwBjFWSrYM3wPuI/wyTHRRQho6p
+HXBeDqTECLbKCP71JKtMy/T4ZZPQF4d+mC/+ZTevFuoYiuJbWtqpUOSiPR43thun
+N89qLR3lUFgVGY/MsgRBUvdPRv5ujMC0mZJGK/gymvccWTKDBOSWd4ajg69DpXHk
+4cCTzlSFjStsjZw5mz+3DlDPJvsczGIyCRVm/qaj2btZ4/X+d2/N0WPUl3Lld1eP
+98+W4VjaTNcyFwT0NVCzx/vVrGJU6H2fKFZp15NpfeUHzT1TwxdUdkYHDAONzZqY
+Jdltkz9afxN7d/2PZB2k
+=mjqd
+-----END PGP SIGNATURE-----
